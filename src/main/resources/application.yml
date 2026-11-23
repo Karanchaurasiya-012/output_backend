@@ -103,6 +103,7 @@ app:
     context-token-budget: ${RAG_CONTEXT_TOKEN_BUDGET:1800}
   retention:
     conversation-days: ${CONVERSATION_RETENTION_DAYS:90}
+    history-max-messages: ${CONVERSATION_HISTORY_MAX_MESSAGES:6}
   redis-cache:
     query-embedding-ttl-seconds: ${REDIS_QUERY_EMBEDDING_TTL:7200}
     retrieval-ttl-seconds: ${REDIS_RETRIEVAL_TTL:900}

@@ -10,8 +10,14 @@ public interface ConversationMessageRepository extends JpaRepository<Conversatio
 
 	List<ConversationMessage> findByConversationIdAndOwnerUserIdOrderByCreatedAtAsc(
 			UUID conversationId,
+			UUID ownerUserId);
+
+	List<ConversationMessage> findByConversationIdAndOwnerUserIdOrderByCreatedAtDesc(
+			UUID conversationId,
 			UUID ownerUserId,
 			Pageable pageable);
 
 	long countByConversationIdAndOwnerUserId(UUID conversationId, UUID ownerUserId);
+
+	void deleteByConversationIdAndOwnerUserId(UUID conversationId, UUID ownerUserId);
 }

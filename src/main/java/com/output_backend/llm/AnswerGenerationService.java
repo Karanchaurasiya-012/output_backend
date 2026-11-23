@@ -18,6 +18,7 @@ import com.output_backend.config.AppProperties;
 import com.output_backend.context.BuiltContext;
 import com.output_backend.context.ContextPreparationService;
 import com.output_backend.context.ContextSource;
+import com.output_backend.conversation.ConversationMessage;
 import com.output_backend.embedding.EmbeddingProfile;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -63,6 +64,19 @@ public class AnswerGenerationService {
 			Collection<UUID> documentIds,
 			String llmProviderOverride
 	) {
+		return answer(ownerUserId, question, documentIds, llmProviderOverride, List.of());
+	}
+
+	public AnswerResult answer(
+			UUID ownerUserId,
+			String question,
+			Collection<UUID> documentIds,
+			String llmProviderOverride,
+			List<ConversationMessage> history
+	) {
+		List<ConversationMessage> safeHistory = history == null ? List.of() : List.copyOf(history);
+		boolean cacheEligible = safeHistory.isEmpty();
+
 		ContextPreparationService.ContextPreparationResult prepared =
 				contextPreparationService.prepare(ownerUserId, question, documentIds);
 		BuiltContext context = prepared.context();
@@ -79,47 +93,49 @@ public class AnswerGenerationService {
 		String docVersion = documentIndexVersionService.currentVersion(ownerUserId);
 		String chunkIdsHash = chunkIdsHash(context.sources());
 
-		var cached = answerResultCache.get(
-				ownerUserId,
-				scopeHash,
-				profile,
-				queryHash,
-				docVersion,
-				chunkIdsHash,
-				provider.id().name().toLowerCase(Locale.ROOT),
-				provider.model(),
-				PromptBuilder.PROMPT_VERSION
-		);
-		if (cached.isPresent()) {
-			AnswerResultCache.CachedAnswer hit = cached.get();
-			List<ContextSource> citations = hit.citations() == null ? List.of() : hit.citations().stream()
-					.map(c -> new ContextSource(
-							c.sourceKey(),
-							c.chunkId(),
-							c.documentId(),
-							c.documentName(),
-							c.pageStart(),
-							c.pageEnd(),
-							0,
-							c.similarity(),
-							0
-					))
-					.toList();
-			return new AnswerResult(
-					hit.grounded(),
-					hit.answer(),
-					citations,
-					hit.rejectedSourceKeys() == null ? List.of() : hit.rejectedSourceKeys(),
+		if (cacheEligible) {
+			var cached = answerResultCache.get(
+					ownerUserId,
+					scopeHash,
+					profile,
+					queryHash,
+					docVersion,
+					chunkIdsHash,
 					provider.id().name().toLowerCase(Locale.ROOT),
 					provider.model(),
-					PromptBuilder.PROMPT_VERSION,
-					prepared,
-					hit.noContext(),
-					true
+					PromptBuilder.PROMPT_VERSION
 			);
+			if (cached.isPresent()) {
+				AnswerResultCache.CachedAnswer hit = cached.get();
+				List<ContextSource> citations = hit.citations() == null ? List.of() : hit.citations().stream()
+						.map(c -> new ContextSource(
+								c.sourceKey(),
+								c.chunkId(),
+								c.documentId(),
+								c.documentName(),
+								c.pageStart(),
+								c.pageEnd(),
+								0,
+								c.similarity(),
+								0
+						))
+						.toList();
+				return new AnswerResult(
+						hit.grounded(),
+						hit.answer(),
+						citations,
+						hit.rejectedSourceKeys() == null ? List.of() : hit.rejectedSourceKeys(),
+						provider.id().name().toLowerCase(Locale.ROOT),
+						provider.model(),
+						PromptBuilder.PROMPT_VERSION,
+						prepared,
+						hit.noContext(),
+						true
+				);
+			}
 		}
 
-		String userPrompt = promptBuilder.buildUserPrompt(question, context);
+		String userPrompt = promptBuilder.buildUserPrompt(question, context, safeHistory);
 		LlmGenerationResult generation = provider.generate(PromptBuilder.SYSTEM_PROMPT, userPrompt);
 		SourceCitationValidator.ValidatedAnswer validated =
 				sourceCitationValidator.validate(generation.rawText(), context);
@@ -137,34 +153,36 @@ public class AnswerGenerationService {
 				false
 		);
 
-		answerResultCache.put(
-				ownerUserId,
-				scopeHash,
-				profile,
-				queryHash,
-				docVersion,
-				chunkIdsHash,
-				result.llmProvider(),
-				result.llmModel(),
-				result.promptVersion(),
-				new AnswerResultCache.CachedAnswer(
-						result.answer(),
-						result.grounded(),
-						result.noContext(),
-						result.citations().stream()
-								.map(c -> new AnswerResultCache.CachedCitation(
-										c.sourceKey(),
-										c.chunkId(),
-										c.documentId(),
-										c.documentName(),
-										c.pageStart(),
-										c.pageEnd(),
-										c.similarity()
-								))
-								.toList(),
-						result.rejectedSourceKeys()
-				)
-		);
+		if (cacheEligible) {
+			answerResultCache.put(
+					ownerUserId,
+					scopeHash,
+					profile,
+					queryHash,
+					docVersion,
+					chunkIdsHash,
+					result.llmProvider(),
+					result.llmModel(),
+					result.promptVersion(),
+					new AnswerResultCache.CachedAnswer(
+							result.answer(),
+							result.grounded(),
+							result.noContext(),
+							result.citations().stream()
+									.map(c -> new AnswerResultCache.CachedCitation(
+											c.sourceKey(),
+											c.chunkId(),
+											c.documentId(),
+											c.documentName(),
+											c.pageStart(),
+											c.pageEnd(),
+											c.similarity()
+									))
+									.toList(),
+							result.rejectedSourceKeys()
+					)
+			);
+		}
 
 		return result;
 	}

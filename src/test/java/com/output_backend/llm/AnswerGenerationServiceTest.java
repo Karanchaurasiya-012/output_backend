@@ -21,6 +21,8 @@ import com.output_backend.config.AppProperties;
 import com.output_backend.context.BuiltContext;
 import com.output_backend.context.ContextPreparationService;
 import com.output_backend.context.ContextSource;
+import com.output_backend.conversation.ConversationMessage;
+import com.output_backend.conversation.MessageRole;
 import com.output_backend.embedding.EmbeddingProfile;
 import com.output_backend.embedding.EmbeddingProviderId;
 import com.output_backend.retrieval.SimilaritySearchService;
@@ -111,6 +113,43 @@ class AnswerGenerationServiceTest {
 		assertThat(result.citations()).containsExactly(s1);
 		assertThat(result.llmModel()).isEqualTo("qwen3.5:4b");
 		assertThat(result.answerCacheHit()).isFalse();
+	}
+
+	@Test
+	void skipsAnswerCacheWhenConversationHistoryPresent() {
+		UUID owner = UUID.randomUUID();
+		UUID chunkId = UUID.randomUUID();
+		ContextSource s1 = new ContextSource("S1", chunkId, UUID.randomUUID(), "a.pdf", 1, 1, 0, 0.9, 10);
+		BuiltContext context = new BuiltContext(
+				"[S1]\nhello",
+				List.of(s1),
+				Map.of(chunkId, s1),
+				10,
+				1800,
+				1,
+				0,
+				0,
+				0,
+				false
+		);
+		when(contextPreparationService.prepare(eq(owner), eq("follow-up"), any()))
+				.thenReturn(preparationWith(context));
+		when(ollama.generate(any(), any())).thenReturn(
+				new LlmGenerationResult("hello\nSOURCES: S1", "ollama", "qwen3.5:4b"));
+
+		ConversationMessage prior = new ConversationMessage();
+		prior.setId(UUID.randomUUID());
+		prior.setConversationId(UUID.randomUUID());
+		prior.setOwnerUserId(owner);
+		prior.setRole(MessageRole.USER);
+		prior.setContent("earlier");
+
+		AnswerGenerationService.AnswerResult result =
+				service.answer(owner, "follow-up", List.of(), "ollama", List.of(prior));
+
+		assertThat(result.answerCacheHit()).isFalse();
+		verify(answerResultCache, never()).get(any(), any(), any(), any(), any(), any(), any(), any(), any());
+		verify(answerResultCache, never()).put(any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
 	}
 
 	@Test

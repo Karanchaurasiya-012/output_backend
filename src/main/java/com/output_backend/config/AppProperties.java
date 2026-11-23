@@ -243,8 +243,10 @@ public class AppProperties {
 	}
 
 	public static class Retention {
-		/** Default conversation message retention (days). Enforced in later conversation phases. */
+		/** Default conversation message retention (days). Enforced by cleanup jobs later. */
 		private int conversationDays = 90;
+		/** Max recent messages loaded into the LLM prompt for follow-ups. */
+		private int historyMaxMessages = 6;
 
 		public int getConversationDays() {
 			return conversationDays;
@@ -252,6 +254,14 @@ public class AppProperties {
 
 		public void setConversationDays(int conversationDays) {
 			this.conversationDays = conversationDays;
+		}
+
+		public int getHistoryMaxMessages() {
+			return historyMaxMessages;
+		}
+
+		public void setHistoryMaxMessages(int historyMaxMessages) {
+			this.historyMaxMessages = historyMaxMessages;
 		}
 	}
 
