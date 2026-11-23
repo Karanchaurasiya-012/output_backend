@@ -12,6 +12,7 @@ public class AppProperties {
 	private final Embedding embedding = new Embedding();
 	private final Llm llm = new Llm();
 	private final Rag rag = new Rag();
+	private final Retention retention = new Retention();
 	private final RedisCache redisCache = new RedisCache();
 	private final Cors cors = new Cors();
 
@@ -29,6 +30,10 @@ public class AppProperties {
 
 	public Rag getRag() {
 		return rag;
+	}
+
+	public Retention getRetention() {
+		return retention;
 	}
 
 	public RedisCache getRedisCache() {
@@ -120,6 +125,19 @@ public class AppProperties {
 
 		public void setSimilarityThreshold(double similarityThreshold) {
 			this.similarityThreshold = similarityThreshold;
+		}
+	}
+
+	public static class Retention {
+		/** Default conversation message retention (days). Enforced in later conversation phases. */
+		private int conversationDays = 90;
+
+		public int getConversationDays() {
+			return conversationDays;
+		}
+
+		public void setConversationDays(int conversationDays) {
+			this.conversationDays = conversationDays;
 		}
 	}
 
