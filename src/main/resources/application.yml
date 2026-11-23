@@ -83,6 +83,12 @@ app:
   embedding:
     default-provider: ${EMBEDDING_PROVIDER:ollama}
     dimensions: ${EMBEDDING_DIMENSIONS:1024}
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://127.0.0.1:11434}
+      model: ${OLLAMA_EMBEDDING_MODEL:bge-m3:latest}
+    gemini:
+      api-key: ${GEMINI_API_KEY:}
+      model: ${GEMINI_EMBEDDING_MODEL:gemini-embedding-001}
   llm:
     default-provider: ${LLM_PROVIDER:ollama}
   rag:

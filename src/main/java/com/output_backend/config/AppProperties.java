@@ -77,6 +77,8 @@ public class AppProperties {
 	public static class Embedding {
 		private String defaultProvider = "ollama";
 		private int dimensions = 1024;
+		private final Ollama ollama = new Ollama();
+		private final Gemini gemini = new Gemini();
 
 		public String getDefaultProvider() {
 			return defaultProvider;
@@ -92,6 +94,56 @@ public class AppProperties {
 
 		public void setDimensions(int dimensions) {
 			this.dimensions = dimensions;
+		}
+
+		public Ollama getOllama() {
+			return ollama;
+		}
+
+		public Gemini getGemini() {
+			return gemini;
+		}
+
+		public static class Ollama {
+			private String baseUrl = "http://127.0.0.1:11434";
+			private String model = "bge-m3:latest";
+
+			public String getBaseUrl() {
+				return baseUrl;
+			}
+
+			public void setBaseUrl(String baseUrl) {
+				this.baseUrl = baseUrl;
+			}
+
+			public String getModel() {
+				return model;
+			}
+
+			public void setModel(String model) {
+				this.model = model;
+			}
+		}
+
+		public static class Gemini {
+			private String model = "gemini-embedding-001";
+			private String apiKey = "";
+
+			public String getModel() {
+				return model;
+			}
+
+			public void setModel(String model) {
+				this.model = model;
+			}
+
+			public String getApiKey() {
+				return apiKey;
+			}
+
+			public void setApiKey(String apiKey) {
+				this.apiKey = apiKey;
+			}
 		}
 	}
 
