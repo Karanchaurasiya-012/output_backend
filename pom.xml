@@ -89,6 +89,13 @@
 			<artifactId>spring-boot-starter-actuator</artifactId>
 		</dependency>
 
+		<!-- OpenAPI for frontend / API consumers (Spring Boot 4.2) -->
+		<dependency>
+			<groupId>org.springdoc</groupId>
+			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+			<version>3.2.1</version>
+		</dependency>
+
 		<!-- Spring AI 2.1.x (Boot 4.2). Auto chat/embed disabled in application.yml until later phases. -->
 		<dependency>
 			<groupId>org.springframework.ai</groupId>
