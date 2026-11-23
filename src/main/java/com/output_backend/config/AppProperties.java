@@ -149,6 +149,8 @@ public class AppProperties {
 
 	public static class Llm {
 		private String defaultProvider = "ollama";
+		private final Ollama ollama = new Ollama();
+		private final Gemini gemini = new Gemini();
 
 		public String getDefaultProvider() {
 			return defaultProvider;
@@ -156,6 +158,56 @@ public class AppProperties {
 
 		public void setDefaultProvider(String defaultProvider) {
 			this.defaultProvider = defaultProvider;
+		}
+
+		public Ollama getOllama() {
+			return ollama;
+		}
+
+		public Gemini getGemini() {
+			return gemini;
+		}
+
+		public static class Ollama {
+			private String baseUrl = "http://127.0.0.1:11434";
+			private String model = "qwen3.5:4b";
+
+			public String getBaseUrl() {
+				return baseUrl;
+			}
+
+			public void setBaseUrl(String baseUrl) {
+				this.baseUrl = baseUrl;
+			}
+
+			public String getModel() {
+				return model;
+			}
+
+			public void setModel(String model) {
+				this.model = model;
+			}
+		}
+
+		public static class Gemini {
+			private String model = "gemini-3.5-flash-lite";
+			private String apiKey = "";
+
+			public String getModel() {
+				return model;
+			}
+
+			public void setModel(String model) {
+				this.model = model;
+			}
+
+			public String getApiKey() {
+				return apiKey;
+			}
+
+			public void setApiKey(String apiKey) {
+				this.apiKey = apiKey;
+			}
 		}
 	}
 

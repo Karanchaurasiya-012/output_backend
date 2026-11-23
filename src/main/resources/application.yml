@@ -91,6 +91,12 @@ app:
       model: ${GEMINI_EMBEDDING_MODEL:gemini-embedding-001}
   llm:
     default-provider: ${LLM_PROVIDER:ollama}
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://127.0.0.1:11434}
+      model: ${OLLAMA_CHAT_MODEL:qwen3.5:4b}
+    gemini:
+      api-key: ${GEMINI_API_KEY:}
+      model: ${GEMINI_CHAT_MODEL:gemini-3.5-flash-lite}
   rag:
     top-k: ${RAG_TOP_K:5}
     similarity-threshold: ${RAG_SIMILARITY_THRESHOLD:0.70}
