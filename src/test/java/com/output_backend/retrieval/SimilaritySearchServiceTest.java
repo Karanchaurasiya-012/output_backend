@@ -2,14 +2,18 @@ package com.output_backend.retrieval;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
+import com.output_backend.cache.DocumentIndexVersionService;
+import com.output_backend.cache.RetrievalResultCache;
 import com.output_backend.config.AppProperties;
 import com.output_backend.embedding.EmbeddingProfile;
 import com.output_backend.embedding.EmbeddingProviderId;
@@ -35,6 +39,12 @@ class SimilaritySearchServiceTest {
 	@Mock
 	private DocumentAccessService documentAccessService;
 
+	@Mock
+	private RetrievalResultCache retrievalResultCache;
+
+	@Mock
+	private DocumentIndexVersionService documentIndexVersionService;
+
 	private AppProperties appProperties;
 	private SimilaritySearchService service;
 
@@ -47,7 +57,9 @@ class SimilaritySearchServiceTest {
 				queryEmbeddingService,
 				chunkSimilarityRepository,
 				documentAccessService,
-				appProperties
+				appProperties,
+				retrievalResultCache,
+				documentIndexVersionService
 		);
 	}
 
@@ -60,10 +72,13 @@ class SimilaritySearchServiceTest {
 		QueryEmbeddingVector vector = new QueryEmbeddingVector(values, "ollama", "bge-m3:latest", 1024);
 
 		when(queryEmbeddingService.embedForDocuments(eq(owner), eq("notice period"), any()))
-				.thenReturn(new QueryEmbeddingService.QueryEmbeddingResult(profile, vector));
+				.thenReturn(new QueryEmbeddingService.QueryEmbeddingResult(profile, vector, false));
+		when(documentIndexVersionService.currentVersion(owner)).thenReturn("0");
+		when(retrievalResultCache.get(eq(owner), any(), eq(profile), any(), eq("0"), eq(5), eq(0.70)))
+				.thenReturn(Optional.empty());
 
-		RetrievedChunk keep = hit(0.20); // similarity 0.80
-		RetrievedChunk drop = hit(0.40); // similarity 0.60
+		RetrievedChunk keep = hit(0.20);
+		RetrievedChunk drop = hit(0.40);
 		when(chunkSimilarityRepository.findSimilar(eq(owner), eq(profile), any(), any(), eq(5)))
 				.thenReturn(List.of(keep, drop));
 
@@ -72,7 +87,31 @@ class SimilaritySearchServiceTest {
 
 		assertThat(result.candidatesConsidered()).isEqualTo(2);
 		assertThat(result.chunks()).containsExactly(keep);
+		assertThat(result.retrievalCacheHit()).isFalse();
 		assertThat(result.hasRelevantContext()).isTrue();
+		verify(retrievalResultCache).put(eq(owner), any(), eq(profile), any(), eq("0"), eq(5), eq(0.70), any());
+	}
+
+	@Test
+	void usesRetrievalCacheHit() {
+		UUID owner = UUID.randomUUID();
+		EmbeddingProfile profile = new EmbeddingProfile(EmbeddingProviderId.OLLAMA, "bge-m3:latest", 1024);
+		float[] values = new float[1024];
+		values[0] = 1f;
+		QueryEmbeddingVector vector = new QueryEmbeddingVector(values, "ollama", "bge-m3:latest", 1024);
+		RetrievedChunk keep = hit(0.10);
+
+		when(queryEmbeddingService.embedForDocuments(eq(owner), eq("q"), any()))
+				.thenReturn(new QueryEmbeddingService.QueryEmbeddingResult(profile, vector, true));
+		when(documentIndexVersionService.currentVersion(owner)).thenReturn("3");
+		when(retrievalResultCache.get(eq(owner), any(), eq(profile), any(), eq("3"), eq(5), eq(0.70)))
+				.thenReturn(Optional.of(new RetrievalResultCache.CachedRetrieval(1, List.of(keep))));
+
+		SimilaritySearchService.SimilaritySearchResult result = service.search(owner, "q", List.of());
+
+		assertThat(result.retrievalCacheHit()).isTrue();
+		assertThat(result.embeddingCacheHit()).isTrue();
+		assertThat(result.chunks()).containsExactly(keep);
 	}
 
 	@Test
@@ -86,7 +125,10 @@ class SimilaritySearchServiceTest {
 
 		when(documentAccessService.requireOwnedDocuments(List.of(docId), owner)).thenReturn(List.of());
 		when(queryEmbeddingService.embedForDocuments(eq(owner), eq("q"), eq(List.of(docId))))
-				.thenReturn(new QueryEmbeddingService.QueryEmbeddingResult(profile, vector));
+				.thenReturn(new QueryEmbeddingService.QueryEmbeddingResult(profile, vector, false));
+		when(documentIndexVersionService.currentVersion(owner)).thenReturn("0");
+		when(retrievalResultCache.get(any(), any(), any(), any(), any(), anyInt(), anyDouble()))
+				.thenReturn(Optional.empty());
 		when(chunkSimilarityRepository.findSimilar(eq(owner), eq(profile), any(), eq(List.of(docId)), eq(5)))
 				.thenReturn(List.of());
 

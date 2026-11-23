@@ -9,8 +9,10 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
+import com.output_backend.cache.QueryEmbeddingCache;
 import com.output_backend.common.exception.BusinessException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -23,6 +25,9 @@ class QueryEmbeddingServiceTest {
 	@Mock
 	private EmbeddingProfileResolver profileResolver;
 
+	@Mock
+	private QueryEmbeddingCache queryEmbeddingCache;
+
 	@Test
 	void usesProfileProviderWithoutFallback() {
 		RecordingProvider ollama = new RecordingProvider(EmbeddingProviderId.OLLAMA, "bge-m3:latest");
@@ -31,20 +36,41 @@ class QueryEmbeddingServiceTest {
 		UUID owner = UUID.randomUUID();
 
 		when(profileResolver.resolve(eq(owner), any())).thenReturn(profile);
+		when(queryEmbeddingCache.get(eq(owner), eq(profile), any())).thenReturn(Optional.empty());
 
-		QueryEmbeddingService service = new QueryEmbeddingService(List.of(ollama, gemini), profileResolver);
+		QueryEmbeddingService service = new QueryEmbeddingService(List.of(ollama, gemini), profileResolver, queryEmbeddingCache);
 		QueryEmbeddingService.QueryEmbeddingResult result = service.embedForDocuments(owner, "hello", List.of());
 
 		assertThat(result.vector().provider()).isEqualTo("gemini");
+		assertThat(result.cacheHit()).isFalse();
 		assertThat(gemini.calls).containsExactly("hello");
 		assertThat(ollama.calls).isEmpty();
 		verify(profileResolver).assertProviderModelMatch(profile, gemini);
+		verify(queryEmbeddingCache).put(eq(owner), eq(profile), any(), any());
+	}
+
+	@Test
+	void returnsCachedEmbeddingWithoutCallingProvider() {
+		RecordingProvider ollama = new RecordingProvider(EmbeddingProviderId.OLLAMA, "bge-m3:latest");
+		EmbeddingProfile profile = new EmbeddingProfile(EmbeddingProviderId.OLLAMA, "bge-m3:latest", 2);
+		UUID owner = UUID.randomUUID();
+		QueryEmbeddingVector cached = new QueryEmbeddingVector(new float[]{0.3f, 0.4f}, "ollama", "bge-m3:latest", 2);
+
+		when(profileResolver.resolve(eq(owner), any())).thenReturn(profile);
+		when(queryEmbeddingCache.get(eq(owner), eq(profile), any())).thenReturn(Optional.of(cached));
+
+		QueryEmbeddingService service = new QueryEmbeddingService(List.of(ollama), profileResolver, queryEmbeddingCache);
+		QueryEmbeddingService.QueryEmbeddingResult result = service.embedForDocuments(owner, "hello", List.of());
+
+		assertThat(result.cacheHit()).isTrue();
+		assertThat(result.vector().values()).containsExactly(0.3f, 0.4f);
+		assertThat(ollama.calls).isEmpty();
 	}
 
 	@Test
 	void embedWithProviderDoesNotFallback() {
 		RecordingProvider ollama = new RecordingProvider(EmbeddingProviderId.OLLAMA, "bge-m3:latest");
-		QueryEmbeddingService service = new QueryEmbeddingService(List.of(ollama), profileResolver);
+		QueryEmbeddingService service = new QueryEmbeddingService(List.of(ollama), profileResolver, queryEmbeddingCache);
 
 		assertThatThrownBy(() -> service.embedWithProvider("gemini", "q"))
 				.isInstanceOf(BusinessException.class)

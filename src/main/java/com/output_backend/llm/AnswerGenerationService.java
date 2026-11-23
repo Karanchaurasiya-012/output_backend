@@ -6,13 +6,19 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.TreeSet;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
+import com.output_backend.cache.AnswerResultCache;
+import com.output_backend.cache.DocumentIndexVersionService;
+import com.output_backend.cache.QueryHash;
 import com.output_backend.common.exception.BusinessException;
 import com.output_backend.config.AppProperties;
 import com.output_backend.context.BuiltContext;
 import com.output_backend.context.ContextPreparationService;
 import com.output_backend.context.ContextSource;
+import com.output_backend.embedding.EmbeddingProfile;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
@@ -27,13 +33,17 @@ public class AnswerGenerationService {
 	private final SourceCitationValidator sourceCitationValidator;
 	private final Map<LlmProviderId, LlmProvider> providers;
 	private final AppProperties appProperties;
+	private final AnswerResultCache answerResultCache;
+	private final DocumentIndexVersionService documentIndexVersionService;
 
 	public AnswerGenerationService(
 			ContextPreparationService contextPreparationService,
 			PromptBuilder promptBuilder,
 			SourceCitationValidator sourceCitationValidator,
 			List<LlmProvider> providerList,
-			AppProperties appProperties) {
+			AppProperties appProperties,
+			AnswerResultCache answerResultCache,
+			DocumentIndexVersionService documentIndexVersionService) {
 		this.contextPreparationService = contextPreparationService;
 		this.promptBuilder = promptBuilder;
 		this.sourceCitationValidator = sourceCitationValidator;
@@ -43,6 +53,8 @@ public class AnswerGenerationService {
 		}
 		this.providers = Map.copyOf(map);
 		this.appProperties = appProperties;
+		this.answerResultCache = answerResultCache;
+		this.documentIndexVersionService = documentIndexVersionService;
 	}
 
 	public AnswerResult answer(
@@ -54,20 +66,65 @@ public class AnswerGenerationService {
 		ContextPreparationService.ContextPreparationResult prepared =
 				contextPreparationService.prepare(ownerUserId, question, documentIds);
 		BuiltContext context = prepared.context();
+		LlmProviderId providerId = resolveProviderId(llmProviderOverride);
 
 		if (context.empty()) {
-			return AnswerResult.noContext(prepared, resolveProviderId(llmProviderOverride));
+			return AnswerResult.noContext(prepared, providerId, false);
 		}
 
-		LlmProviderId providerId = resolveProviderId(llmProviderOverride);
 		LlmProvider provider = requireProvider(providerId);
+		EmbeddingProfile profile = prepared.retrieval().profile();
+		String queryHash = QueryHash.ofQuestion(question);
+		String scopeHash = QueryHash.ofDocumentScope(documentIds);
+		String docVersion = documentIndexVersionService.currentVersion(ownerUserId);
+		String chunkIdsHash = chunkIdsHash(context.sources());
+
+		var cached = answerResultCache.get(
+				ownerUserId,
+				scopeHash,
+				profile,
+				queryHash,
+				docVersion,
+				chunkIdsHash,
+				provider.id().name().toLowerCase(Locale.ROOT),
+				provider.model(),
+				PromptBuilder.PROMPT_VERSION
+		);
+		if (cached.isPresent()) {
+			AnswerResultCache.CachedAnswer hit = cached.get();
+			List<ContextSource> citations = hit.citations() == null ? List.of() : hit.citations().stream()
+					.map(c -> new ContextSource(
+							c.sourceKey(),
+							c.chunkId(),
+							c.documentId(),
+							c.documentName(),
+							c.pageStart(),
+							c.pageEnd(),
+							0,
+							c.similarity(),
+							0
+					))
+					.toList();
+			return new AnswerResult(
+					hit.grounded(),
+					hit.answer(),
+					citations,
+					hit.rejectedSourceKeys() == null ? List.of() : hit.rejectedSourceKeys(),
+					provider.id().name().toLowerCase(Locale.ROOT),
+					provider.model(),
+					PromptBuilder.PROMPT_VERSION,
+					prepared,
+					hit.noContext(),
+					true
+			);
+		}
 
 		String userPrompt = promptBuilder.buildUserPrompt(question, context);
 		LlmGenerationResult generation = provider.generate(PromptBuilder.SYSTEM_PROMPT, userPrompt);
 		SourceCitationValidator.ValidatedAnswer validated =
 				sourceCitationValidator.validate(generation.rawText(), context);
 
-		return new AnswerResult(
+		AnswerResult result = new AnswerResult(
 				true,
 				validated.answer(),
 				validated.citations(),
@@ -76,8 +133,47 @@ public class AnswerGenerationService {
 				provider.model(),
 				PromptBuilder.PROMPT_VERSION,
 				prepared,
+				false,
 				false
 		);
+
+		answerResultCache.put(
+				ownerUserId,
+				scopeHash,
+				profile,
+				queryHash,
+				docVersion,
+				chunkIdsHash,
+				result.llmProvider(),
+				result.llmModel(),
+				result.promptVersion(),
+				new AnswerResultCache.CachedAnswer(
+						result.answer(),
+						result.grounded(),
+						result.noContext(),
+						result.citations().stream()
+								.map(c -> new AnswerResultCache.CachedCitation(
+										c.sourceKey(),
+										c.chunkId(),
+										c.documentId(),
+										c.documentName(),
+										c.pageStart(),
+										c.pageEnd(),
+										c.similarity()
+								))
+								.toList(),
+						result.rejectedSourceKeys()
+				)
+		);
+
+		return result;
+	}
+
+	private static String chunkIdsHash(List<ContextSource> sources) {
+		String joined = sources.stream()
+				.map(s -> s.chunkId().toString())
+				.collect(Collectors.collectingAndThen(Collectors.toCollection(TreeSet::new), set -> String.join(",", set)));
+		return QueryHash.sha256(joined);
 	}
 
 	private LlmProviderId resolveProviderId(String override) {
@@ -112,11 +208,13 @@ public class AnswerGenerationService {
 			String llmModel,
 			String promptVersion,
 			ContextPreparationService.ContextPreparationResult preparation,
-			boolean noContext
+			boolean noContext,
+			boolean answerCacheHit
 	) {
 		static AnswerResult noContext(
 				ContextPreparationService.ContextPreparationResult preparation,
-				LlmProviderId requestedProvider
+				LlmProviderId requestedProvider,
+				boolean answerCacheHit
 		) {
 			return new AnswerResult(
 					false,
@@ -127,7 +225,8 @@ public class AnswerGenerationService {
 					null,
 					PromptBuilder.PROMPT_VERSION,
 					preparation,
-					true
+					true,
+					answerCacheHit
 			);
 		}
 
@@ -139,6 +238,9 @@ public class AnswerGenerationService {
 			data.put("llmProvider", llmProvider);
 			data.put("llmModel", llmModel);
 			data.put("promptVersion", promptVersion);
+			data.put("answerCacheHit", answerCacheHit);
+			data.put("embeddingCacheHit", preparation.retrieval().embeddingCacheHit());
+			data.put("retrievalCacheHit", preparation.retrieval().retrievalCacheHit());
 			data.put("rejectedSourceKeys", rejectedSourceKeys);
 			data.put("citations", citations.stream().map(c -> {
 				Map<String, Object> row = new LinkedHashMap<>();

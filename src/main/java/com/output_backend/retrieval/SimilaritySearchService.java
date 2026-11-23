@@ -4,6 +4,9 @@ import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
+import com.output_backend.cache.DocumentIndexVersionService;
+import com.output_backend.cache.QueryHash;
+import com.output_backend.cache.RetrievalResultCache;
 import com.output_backend.common.exception.BusinessException;
 import com.output_backend.config.AppProperties;
 import com.output_backend.embedding.EmbeddingProfile;
@@ -24,16 +27,22 @@ public class SimilaritySearchService {
 	private final ChunkSimilarityRepository chunkSimilarityRepository;
 	private final DocumentAccessService documentAccessService;
 	private final AppProperties appProperties;
+	private final RetrievalResultCache retrievalResultCache;
+	private final DocumentIndexVersionService documentIndexVersionService;
 
 	public SimilaritySearchService(
 			QueryEmbeddingService queryEmbeddingService,
 			ChunkSimilarityRepository chunkSimilarityRepository,
 			DocumentAccessService documentAccessService,
-			AppProperties appProperties) {
+			AppProperties appProperties,
+			RetrievalResultCache retrievalResultCache,
+			DocumentIndexVersionService documentIndexVersionService) {
 		this.queryEmbeddingService = queryEmbeddingService;
 		this.chunkSimilarityRepository = chunkSimilarityRepository;
 		this.documentAccessService = documentAccessService;
 		this.appProperties = appProperties;
+		this.retrievalResultCache = retrievalResultCache;
+		this.documentIndexVersionService = documentIndexVersionService;
 	}
 
 	public SimilaritySearchResult search(UUID ownerUserId, String question, Collection<UUID> documentIds) {
@@ -43,7 +52,6 @@ public class SimilaritySearchService {
 
 		Collection<UUID> scopedDocumentIds = documentIds;
 		if (documentIds != null && !documentIds.isEmpty()) {
-			// Enforce ownership before retrieval SQL (defense in depth with SQL filters).
 			documentAccessService.requireOwnedDocuments(documentIds, ownerUserId);
 			scopedDocumentIds = documentIds;
 		}
@@ -55,6 +63,25 @@ public class SimilaritySearchService {
 		QueryEmbeddingVector vector = embedded.vector();
 		int topK = Math.max(1, appProperties.getRag().getTopK());
 		double threshold = appProperties.getRag().getSimilarityThreshold();
+		String queryHash = QueryHash.ofQuestion(question);
+		String scopeHash = QueryHash.ofDocumentScope(scopedDocumentIds);
+		String docVersion = documentIndexVersionService.currentVersion(ownerUserId);
+
+		var cached = retrievalResultCache.get(
+				ownerUserId, scopeHash, profile, queryHash, docVersion, topK, threshold);
+		if (cached.isPresent()) {
+			RetrievalResultCache.CachedRetrieval hit = cached.get();
+			List<RetrievedChunk> relevant = hit.chunks() == null ? List.of() : hit.chunks();
+			// Defense in depth: cached rows must still belong to this owner/profile.
+			relevant = relevant.stream()
+					.filter(c -> profile.providerKey().equals(c.embeddingProvider()))
+					.filter(c -> profile.model().equals(c.embeddingModel()))
+					.filter(c -> c.similarity() >= threshold)
+					.toList();
+			return new SimilaritySearchResult(
+					profile, topK, threshold, hit.candidatesConsidered(), relevant,
+					embedded.cacheHit(), true);
+		}
 
 		List<RetrievedChunk> topHits = chunkSimilarityRepository.findSimilar(
 				ownerUserId,
@@ -68,13 +95,20 @@ public class SimilaritySearchService {
 				.filter(hit -> hit.similarity() >= threshold)
 				.toList();
 
-		return new SimilaritySearchResult(
+		retrievalResultCache.put(
+				ownerUserId,
+				scopeHash,
 				profile,
+				queryHash,
+				docVersion,
 				topK,
 				threshold,
-				topHits.size(),
-				relevant
+				new RetrievalResultCache.CachedRetrieval(topHits.size(), relevant)
 		);
+
+		return new SimilaritySearchResult(
+				profile, topK, threshold, topHits.size(), relevant,
+				embedded.cacheHit(), false);
 	}
 
 	public record SimilaritySearchResult(
@@ -82,8 +116,20 @@ public class SimilaritySearchService {
 			int topK,
 			double similarityThreshold,
 			int candidatesConsidered,
-			List<RetrievedChunk> chunks
+			List<RetrievedChunk> chunks,
+			boolean embeddingCacheHit,
+			boolean retrievalCacheHit
 	) {
+		public SimilaritySearchResult(
+				EmbeddingProfile profile,
+				int topK,
+				double similarityThreshold,
+				int candidatesConsidered,
+				List<RetrievedChunk> chunks
+		) {
+			this(profile, topK, similarityThreshold, candidatesConsidered, chunks, false, false);
+		}
+
 		public boolean hasRelevantContext() {
 			return chunks != null && !chunks.isEmpty();
 		}

@@ -11,8 +11,11 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
+import com.output_backend.cache.AnswerResultCache;
+import com.output_backend.cache.DocumentIndexVersionService;
 import com.output_backend.common.exception.BusinessException;
 import com.output_backend.config.AppProperties;
 import com.output_backend.context.BuiltContext;
@@ -36,6 +39,12 @@ class AnswerGenerationServiceTest {
 	@Mock
 	private LlmProvider ollama;
 
+	@Mock
+	private AnswerResultCache answerResultCache;
+
+	@Mock
+	private DocumentIndexVersionService documentIndexVersionService;
+
 	private AnswerGenerationService service;
 
 	@BeforeEach
@@ -44,13 +53,19 @@ class AnswerGenerationServiceTest {
 		props.getLlm().setDefaultProvider("ollama");
 		lenient().when(ollama.id()).thenReturn(LlmProviderId.OLLAMA);
 		lenient().when(ollama.model()).thenReturn("qwen3.5:4b");
+		lenient().when(answerResultCache.enabled()).thenReturn(false);
+		lenient().when(answerResultCache.get(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+				.thenReturn(Optional.empty());
+		lenient().when(documentIndexVersionService.currentVersion(any())).thenReturn("0");
 
 		service = new AnswerGenerationService(
 				contextPreparationService,
 				new PromptBuilder(),
 				new SourceCitationValidator(),
 				List.of(ollama),
-				props
+				props,
+				answerResultCache,
+				documentIndexVersionService
 		);
 	}
 
@@ -95,6 +110,7 @@ class AnswerGenerationServiceTest {
 		assertThat(result.grounded()).isTrue();
 		assertThat(result.citations()).containsExactly(s1);
 		assertThat(result.llmModel()).isEqualTo("qwen3.5:4b");
+		assertThat(result.answerCacheHit()).isFalse();
 	}
 
 	@Test
@@ -133,7 +149,9 @@ class AnswerGenerationServiceTest {
 				5,
 				0.70,
 				0,
-				List.of()
+				List.of(),
+				false,
+				false
 		);
 		return new ContextPreparationService.ContextPreparationResult(retrieval, context);
 	}
