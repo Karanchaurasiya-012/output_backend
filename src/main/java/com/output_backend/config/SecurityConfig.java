@@ -1,6 +1,7 @@
 package com.output_backend.config;
 
 import com.output_backend.security.CookieBearerTokenResolver;
+import com.output_backend.security.JsonAuthenticationEntryPoint;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
@@ -20,7 +21,11 @@ public class SecurityConfig {
 	}
 
 	@Bean
-	SecurityFilterChain securityFilterChain(HttpSecurity http, BearerTokenResolver bearerTokenResolver) throws Exception {
+	SecurityFilterChain securityFilterChain(
+			HttpSecurity http,
+			BearerTokenResolver bearerTokenResolver,
+			JsonAuthenticationEntryPoint authenticationEntryPoint
+	) throws Exception {
 		http
 				.csrf(csrf -> csrf.disable())
 				.cors(Customizer.withDefaults())
@@ -37,8 +42,10 @@ public class SecurityConfig {
 						).permitAll()
 						.anyRequest().authenticated()
 				)
+				.exceptionHandling(ex -> ex.authenticationEntryPoint(authenticationEntryPoint))
 				.oauth2ResourceServer(oauth2 -> oauth2
 						.bearerTokenResolver(bearerTokenResolver)
+						.authenticationEntryPoint(authenticationEntryPoint)
 						.jwt(Customizer.withDefaults())
 				);
 		return http.build();

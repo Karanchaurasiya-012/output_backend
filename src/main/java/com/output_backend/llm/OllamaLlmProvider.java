@@ -37,12 +37,14 @@ public class OllamaLlmProvider implements LlmProvider {
 				? "qwen3.5:4b"
 				: ollama.getModel().trim();
 
+		int timeoutSeconds = Math.max(60, ollama.getReadTimeoutSeconds());
 		JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory();
-		requestFactory.setReadTimeout(Duration.ofSeconds(180));
+		requestFactory.setReadTimeout(Duration.ofSeconds(timeoutSeconds));
 		this.restClient = RestClient.builder()
 				.baseUrl(baseUrl)
 				.requestFactory(requestFactory)
 				.build();
+		log.info("Ollama chat client ready model={} readTimeoutSeconds={}", this.model, timeoutSeconds);
 	}
 
 	@Override

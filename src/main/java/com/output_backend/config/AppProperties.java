@@ -171,6 +171,8 @@ public class AppProperties {
 		public static class Ollama {
 			private String baseUrl = "http://127.0.0.1:11434";
 			private String model = "qwen3.5:4b";
+			/** HTTP read timeout for /api/chat (local CPU models can be slow). */
+			private int readTimeoutSeconds = 600;
 
 			public String getBaseUrl() {
 				return baseUrl;
@@ -186,6 +188,14 @@ public class AppProperties {
 
 			public void setModel(String model) {
 				this.model = model;
+			}
+
+			public int getReadTimeoutSeconds() {
+				return readTimeoutSeconds;
+			}
+
+			public void setReadTimeoutSeconds(int readTimeoutSeconds) {
+				this.readTimeoutSeconds = readTimeoutSeconds;
 			}
 		}
 
