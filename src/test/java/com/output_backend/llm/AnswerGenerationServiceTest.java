@@ -98,7 +98,7 @@ class AnswerGenerationServiceTest {
 	}
 
 	@Test
-	void doesNotFallbackWhenGeminiRequestedButUnavailable() {
+	void doesNotFallbackWhenUnknownProviderRequested() {
 		UUID owner = UUID.randomUUID();
 		UUID chunkId = UUID.randomUUID();
 		ContextSource s1 = new ContextSource("S1", chunkId, UUID.randomUUID(), "a.pdf", 1, 1, 0, 0.9, 10);
@@ -117,9 +117,9 @@ class AnswerGenerationServiceTest {
 		when(contextPreparationService.prepare(eq(owner), eq("q"), any()))
 				.thenReturn(preparationWith(context));
 
-		assertThatThrownBy(() -> service.answer(owner, "q", List.of(), "gemini"))
+		assertThatThrownBy(() -> service.answer(owner, "q", List.of(), "cloudflare"))
 				.isInstanceOf(BusinessException.class)
-				.hasMessageContaining("not available");
+				.hasMessageContaining("Unknown LLM provider");
 		verify(ollama, never()).generate(any(), any());
 	}
 
