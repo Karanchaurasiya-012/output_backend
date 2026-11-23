@@ -1,0 +1,62 @@
+# RAG Query Service — independently deployable.
+# Uses Redis on the compose network. PostgreSQL is the existing shared DB
+# (processing_backend / host). Point DB_URL at that instance (rag_query role preferred).
+#
+# Ollama on the Ubuntu host: localhost inside the container is NOT the host.
+# Compose sets OLLAMA_BASE_URL=http://host.docker.internal:11434 via host-gateway.
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: rag-query-redis
+    # Private cache network by default (no host publish). Uncomment to debug from host:
+    # ports:
+    #   - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    volumes:
+      - rag_redis_data:/data
+
+  rag-query:
+    build: .
+    container_name: rag-query-api
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "8090:8090"
+    env_file:
+      - .env
+    environment:
+      SERVER_PORT: 8090
+      # Override .env localhost* values — they are unreachable inside the container.
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      JWT_PUBLIC_KEY_PATH: /app/keys/public.pem
+      # Shared Postgres on the host. Prefer rag_query role via DB_USERNAME/DB_PASSWORD in .env.
+      # Default matches local host PG on 5432. If using processing_backend compose Postgres,
+      # set COMPOSE_DB_URL=jdbc:postgresql://host.docker.internal:5437/document_db
+      DB_URL: ${COMPOSE_DB_URL:-jdbc:postgresql://host.docker.internal:5432/postgres}
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      OLLAMA_BASE_URL: ${COMPOSE_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      JWT_ISSUER: ${JWT_ISSUER:-http://localhost:8080}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-auth-api}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./keys:/app/keys:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8090/api/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 50s
+
+volumes:
+  rag_redis_data:
