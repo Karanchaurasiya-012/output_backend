@@ -5,11 +5,9 @@ spring:
     default: local
   config:
     import: optional:file:.env[.properties]
-  # JWT resource-server waits for Phase 3. Google GenAI beans wait for Phase 4/8 config.
+  # Google GenAI beans wait for Phase 4/8 config (project-id / API wiring).
   autoconfigure:
     exclude:
-      - org.springframework.boot.security.oauth2.server.resource.autoconfigure.servlet.OAuth2ResourceServerAutoConfiguration
-      - org.springframework.boot.security.oauth2.server.resource.autoconfigure.OAuth2ResourceServerAutoConfiguration
       - org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiEmbeddingConnectionAutoConfiguration
       - org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiTextEmbeddingAutoConfiguration
       - org.springframework.ai.model.google.genai.autoconfigure.chat.GoogleGenAiChatAutoConfiguration
