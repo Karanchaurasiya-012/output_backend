@@ -162,6 +162,8 @@ public class AppProperties {
 	public static class Rag {
 		private int topK = 5;
 		private double similarityThreshold = 0.70;
+		/** Approximate max tokens for retrieved document context passed to the LLM. */
+		private int contextTokenBudget = 1800;
 
 		public int getTopK() {
 			return topK;
@@ -177,6 +179,14 @@ public class AppProperties {
 
 		public void setSimilarityThreshold(double similarityThreshold) {
 			this.similarityThreshold = similarityThreshold;
+		}
+
+		public int getContextTokenBudget() {
+			return contextTokenBudget;
+		}
+
+		public void setContextTokenBudget(int contextTokenBudget) {
+			this.contextTokenBudget = contextTokenBudget;
 		}
 	}
 

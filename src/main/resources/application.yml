@@ -94,6 +94,7 @@ app:
   rag:
     top-k: ${RAG_TOP_K:5}
     similarity-threshold: ${RAG_SIMILARITY_THRESHOLD:0.70}
+    context-token-budget: ${RAG_CONTEXT_TOKEN_BUDGET:1800}
   retention:
     conversation-days: ${CONVERSATION_RETENTION_DAYS:90}
   redis-cache:
