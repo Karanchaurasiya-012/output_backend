@@ -1,0 +1,119 @@
+package com.output_backend.retrieval;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import java.util.List;
+import java.util.UUID;
+
+import com.output_backend.config.AppProperties;
+import com.output_backend.embedding.EmbeddingProfile;
+import com.output_backend.embedding.EmbeddingProviderId;
+import com.output_backend.embedding.QueryEmbeddingService;
+import com.output_backend.embedding.QueryEmbeddingVector;
+import com.output_backend.ingestion.DocumentAccessService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+@ExtendWith(MockitoExtension.class)
+class SimilaritySearchServiceTest {
+
+	@Mock
+	private QueryEmbeddingService queryEmbeddingService;
+
+	@Mock
+	private ChunkSimilarityRepository chunkSimilarityRepository;
+
+	@Mock
+	private DocumentAccessService documentAccessService;
+
+	private AppProperties appProperties;
+	private SimilaritySearchService service;
+
+	@BeforeEach
+	void setUp() {
+		appProperties = new AppProperties();
+		appProperties.getRag().setTopK(5);
+		appProperties.getRag().setSimilarityThreshold(0.70);
+		service = new SimilaritySearchService(
+				queryEmbeddingService,
+				chunkSimilarityRepository,
+				documentAccessService,
+				appProperties
+		);
+	}
+
+	@Test
+	void filtersHitsBelowSimilarityThreshold() {
+		UUID owner = UUID.randomUUID();
+		EmbeddingProfile profile = new EmbeddingProfile(EmbeddingProviderId.OLLAMA, "bge-m3:latest", 1024);
+		float[] values = new float[1024];
+		values[0] = 1f;
+		QueryEmbeddingVector vector = new QueryEmbeddingVector(values, "ollama", "bge-m3:latest", 1024);
+
+		when(queryEmbeddingService.embedForDocuments(eq(owner), eq("notice period"), any()))
+				.thenReturn(new QueryEmbeddingService.QueryEmbeddingResult(profile, vector));
+
+		RetrievedChunk keep = hit(0.20); // similarity 0.80
+		RetrievedChunk drop = hit(0.40); // similarity 0.60
+		when(chunkSimilarityRepository.findSimilar(eq(owner), eq(profile), any(), any(), eq(5)))
+				.thenReturn(List.of(keep, drop));
+
+		SimilaritySearchService.SimilaritySearchResult result =
+				service.search(owner, "notice period", List.of());
+
+		assertThat(result.candidatesConsidered()).isEqualTo(2);
+		assertThat(result.chunks()).containsExactly(keep);
+		assertThat(result.hasRelevantContext()).isTrue();
+	}
+
+	@Test
+	void validatesOwnedDocumentIdsBeforeSearch() {
+		UUID owner = UUID.randomUUID();
+		UUID docId = UUID.randomUUID();
+		EmbeddingProfile profile = new EmbeddingProfile(EmbeddingProviderId.OLLAMA, "bge-m3:latest", 1024);
+		float[] values = new float[1024];
+		values[0] = 1f;
+		QueryEmbeddingVector vector = new QueryEmbeddingVector(values, "ollama", "bge-m3:latest", 1024);
+
+		when(documentAccessService.requireOwnedDocuments(List.of(docId), owner)).thenReturn(List.of());
+		when(queryEmbeddingService.embedForDocuments(eq(owner), eq("q"), eq(List.of(docId))))
+				.thenReturn(new QueryEmbeddingService.QueryEmbeddingResult(profile, vector));
+		when(chunkSimilarityRepository.findSimilar(eq(owner), eq(profile), any(), eq(List.of(docId)), eq(5)))
+				.thenReturn(List.of());
+
+		SimilaritySearchService.SimilaritySearchResult result = service.search(owner, "q", List.of(docId));
+
+		assertThat(result.hasRelevantContext()).isFalse();
+		verify(documentAccessService).requireOwnedDocuments(List.of(docId), owner);
+
+		ArgumentCaptor<String> literal = ArgumentCaptor.forClass(String.class);
+		verify(chunkSimilarityRepository).findSimilar(
+				eq(owner), eq(profile), literal.capture(), eq(List.of(docId)), eq(5));
+		assertThat(literal.getValue()).startsWith("[").endsWith("]");
+	}
+
+	private static RetrievedChunk hit(double distance) {
+		return new RetrievedChunk(
+				UUID.randomUUID(),
+				UUID.randomUUID(),
+				"doc.pdf",
+				0,
+				"content",
+				1,
+				1,
+				"ollama",
+				"bge-m3:latest",
+				distance,
+				1.0 - distance
+		);
+	}
+}
